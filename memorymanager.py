@@ -11,9 +11,10 @@ class MemManager:
         self.memory = {
             "ram_mem": ram.memory,
             "used_ram_mem": 0,
-            "arenas": pd.DataFrame(columns=["arena_obj", "arena_name", "arena_mem", "arena_max", "pools"])
+            "arenas": pd.DataFrame(columns=["arena_obj", "arena_name", "pools"])
         }
         self.object_index = {}
+        self.free_blocks = []
 
     def generate_unique_id(self) -> str:
         return str(uuid.uuid4())
@@ -21,28 +22,26 @@ class MemManager:
     def add_arena(self, arena: Arena) -> None:
         arena_count = len(self.memory["arenas"]) + 1
         arena_name = f"Arena {arena_count}"
-        new_arena = {
+        new_arena = pd.DataFrame([{
             "arena_obj": arena,
             "arena_name": arena_name,
-            "arena_mem": arena.mem,
-            "arena_max": arena.max_mem,
-            "pools": pd.DataFrame(columns=["pool_obj", "pool_name", "pool_mem", "pool_max", "blocks"])
-        }
-        self.memory["arenas"] = pd.concat([self.memory["arenas"], pd.DataFrame([new_arena])], ignore_index=True)
+            "pools": pd.DataFrame(columns=["pool_obj", "pool_name", "blocks"])
+        }])
+        self.memory["arenas"] = pd.concat([self.memory["arenas"], new_arena], ignore_index=True)
+        print(f"Added Arena: {arena_name}")
 
     def add_pool(self, arena_name: str, pool: Pool) -> None:
         arena_index = self.memory["arenas"][self.memory["arenas"]["arena_name"] == arena_name].index
         if not arena_index.empty:
             arena_index = arena_index[0]
-            pool_count = len(self.memory["arenas"].loc[arena_index, "pools"]) + 1
-            new_pool = {
+            pool_count = len(self.memory["arenas"].at[arena_index, "pools"]) + 1
+            new_pool = pd.DataFrame([{
                 "pool_obj": pool,
                 "pool_name": f"pool {pool_count}",
-                "pool_mem": pool.mem,
-                "pool_max": pool.max_mem,
-                "blocks": pd.DataFrame(columns=["block_mem", "block_max"])
-            }
-            self.memory["arenas"].at[arena_index, "pools"] = pd.concat([self.memory["arenas"].at[arena_index, "pools"], pd.DataFrame([new_pool])], ignore_index=True)
+                "blocks": pd.DataFrame(columns=["block_obj"])
+            }])
+            self.memory["arenas"].at[arena_index, "pools"] = pd.concat([self.memory["arenas"].at[arena_index, "pools"], new_pool], ignore_index=True)
+            print(f"Added Pool: pool {pool_count} to Arena: {arena_name}")
         else:
             raise ValueError(f"Arena {arena_name} does not exist.")
 
@@ -53,27 +52,29 @@ class MemManager:
             pool_index = self.memory["arenas"].at[arena_index, "pools"][self.memory["arenas"].at[arena_index, "pools"]["pool_name"] == pool_name].index
             if not pool_index.empty:
                 pool_index = pool_index[0]
-                block_count = len(self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "blocks"]) + 1
+                pool = self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "pool_obj"]
+                if pool.mem + block.mem > pool.max_mem:
+                    # Pool is full, create a new pool
+                    new_pool = Pool(0)
+                    self.add_pool(arena_name, new_pool)
+                    pool_name = f"pool {len(self.memory['arenas'].at[arena_index, 'pools'])}"
                 new_block = {
-                    "block_mem": block.mem,
-                    "block_max": block.max_mem
+                    "block_obj": block
                 }
                 self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "blocks"] = pd.concat([self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "blocks"], pd.DataFrame([new_block])], ignore_index=True)
+                pool.mem += block.mem
+                print(f"Added Block to Pool: {pool_name} in Arena: {arena_name}")
             else:
                 raise ValueError(f"Pool {pool_name} does not exist in Arena {arena_name}.")
         else:
             raise ValueError(f"Arena {arena_name} does not exist.")
-
-    def check_memory_exceeds(self) -> bool:
-        self.total_block_memory = self.memory["arenas"]["pools"].apply(lambda pools: pools["blocks"]["block_mem"].sum()).sum()
-        return self.total_block_memory
 
     def calculate_arena_memory(self, arena_name: str) -> int:
         arena_index = self.memory["arenas"][self.memory["arenas"]["arena_name"] == arena_name].index
         if arena_index.empty:
             raise ValueError(f"Arena {arena_name} does not exist.")
         arena_index = arena_index[0]
-        return self.memory["arenas"].at[arena_index, "pools"]["pool_mem"].sum()
+        return sum(pool.pool_obj.mem for pool in self.memory["arenas"].at[arena_index, "pools"].itertuples())
 
     def calculate_pool_memory(self, arena_name: str, pool_name: str) -> int:
         arena_index = self.memory["arenas"][self.memory["arenas"]["arena_name"] == arena_name].index
@@ -84,109 +85,76 @@ class MemManager:
         if pool_index.empty:
             raise ValueError(f"Pool {pool_name} does not exist in Arena {arena_name}.")
         pool_index = pool_index[0]
-        return self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "blocks"]["block_mem"].sum()
-
-    def check_enough_arenas(self, obj_mem):
-        required_arenas = (obj_mem // self.ram.max_arena_size) + 1
-        remaining_memory = self.ram.memory - self.memory["used_ram_mem"]
-        if remaining_memory < obj_mem:
-            raise MemoryError("Not enough memory available to create more arenas.")
-        return required_arenas
-
-    def check_enough_pools(self, arena, obj_mem):
-        required_pools = (obj_mem // self.ram.max_pool_size) + 1
-        remaining_memory = arena["arena_max"] - arena["arena_mem"]
-        if remaining_memory < obj_mem:
-            raise MemoryError("Not enough memory available in the arena to create more pools.")
-        return required_pools
-
-    def check_enough_blocks(self, pool, obj_mem):
-        required_blocks = (obj_mem // self.ram.max_block_size) + 1
-        remaining_memory = pool["pool_max"] - pool["pool_mem"]
-        if remaining_memory < obj_mem:
-            raise MemoryError("Not enough memory available in the pool to create more blocks.")
-        return required_blocks
+        return sum(block.block_obj.mem for block in self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "blocks"].itertuples())
 
     def fill_ram(self, obj_mem):
         remaining_memory = obj_mem
         while remaining_memory > 0:
-            if self.memory["arenas"].empty or self.memory["arenas"].iloc[-1]["arena_mem"] >= self.memory["arenas"].iloc[-1]["arena_max"]:
+            if self.memory["arenas"].empty or self.memory["arenas"].iloc[-1]["arena_obj"].mem >= self.memory["arenas"].iloc[-1]["arena_obj"].max_mem:
                 new_arena = Arena(0)
                 self.add_arena(new_arena)
             last_arena = self.memory["arenas"].iloc[-1]
-            if last_arena["arena_mem"] < last_arena["arena_max"]:
-                self.fill_pools(last_arena, remaining_memory)
-                remaining_memory -= min(remaining_memory, last_arena["arena_max"] - last_arena["arena_mem"])
+            if last_arena["arena_obj"].mem < last_arena["arena_obj"].max_mem:
+                mem_to_add = min(remaining_memory, last_arena["arena_obj"].max_mem - last_arena["arena_obj"].mem)
+                last_arena["arena_obj"].add_mem(mem_to_add)
+                remaining_memory -= mem_to_add
+                print(f"Filling pools in {last_arena['arena_name']} with {mem_to_add} memory")
+                self.fill_pools(last_arena["arena_obj"], mem_to_add)
             else:
                 raise MemoryError("Not enough memory available in the arenas to allocate the object.")
-
-    def fill_arenas(self, obj_mem):
-        remaining_memory = obj_mem
-        arenas = self.memory["arenas"]
-        available_memory = arenas["arena_max"] - arenas["arena_mem"]
-        arenas["arena_mem"] += available_memory.clip(upper=remaining_memory)
-        remaining_memory -= available_memory.sum()
-        if remaining_memory > 0:
-            raise MemoryError("Not enough memory available in the arenas to allocate the object.")
+        self.memory["used_ram_mem"] += obj_mem
+        print(f"Used RAM Memory: {self.memory['used_ram_mem']}")
 
     def fill_pools(self, arena, obj_mem):
+        print(f"Filling pools in {arena} with {obj_mem} memory")
         remaining_memory = obj_mem
-        pools = arena["pools"]
-        available_memory = pools["pool_max"] - pools["pool_mem"]
-        pools["pool_mem"] += available_memory.clip(upper=remaining_memory)
-        remaining_memory -= available_memory.sum()
-        if remaining_memory > 0:
-            raise MemoryError("Not enough memory available in the pools to allocate the object.")
+        arena_index = self.memory["arenas"][self.memory["arenas"]["arena_obj"] == arena].index[0]
 
-    def fill_blocks(self, pool, obj_mem):
+        while remaining_memory > 0:
+            if self.memory["arenas"].at[arena_index, "pools"].empty or self.memory["arenas"].at[arena_index, "pools"].iloc[-1]["pool_obj"].mem >= self.memory["arenas"].at[arena_index, "pools"].iloc[-1]["pool_obj"].max_mem:
+                new_pool = Pool(0)
+                pool_count = len(self.memory["arenas"].at[arena_index, "pools"]) + 1
+                new_pool_df = pd.DataFrame([{
+                    "pool_obj": new_pool,
+                    "pool_name": f"pool {pool_count}",
+                    "blocks": pd.DataFrame(columns=["block_obj"])
+                }])
+                self.memory["arenas"].at[arena_index, "pools"] = pd.concat([self.memory["arenas"].at[arena_index, "pools"], new_pool_df], ignore_index=True)
+                print(f"Added Pool: pool {pool_count} to Arena: {arena}")
+
+            last_pool = self.memory["arenas"].at[arena_index, "pools"].iloc[-1]
+            if last_pool["pool_obj"].mem < last_pool["pool_obj"].max_mem:
+                mem_to_add = min(remaining_memory, last_pool["pool_obj"].max_mem - last_pool["pool_obj"].mem)
+                last_pool["pool_obj"].add_mem(mem_to_add)
+                remaining_memory -= mem_to_add
+                print(f"Filling blocks in {last_pool['pool_name']} with {mem_to_add} memory")
+                self.fill_blocks(last_pool["pool_obj"], mem_to_add, arena_index)
+            else:
+                raise MemoryError("Not enough memory available in the pools to allocate the object.")
+
+        print(f"Total Pool Memory in Arena: {arena.mem}")
+
+    def fill_blocks(self, pool, obj_mem, arena_index):
         remaining_memory = obj_mem
-        blocks = pool["blocks"]
-        available_memory = blocks["block_max"] - blocks["block_mem"]
-        blocks["block_mem"] += available_memory.clip(upper=remaining_memory)
-        remaining_memory -= available_memory.sum()
-        if remaining_memory > 0:
-            raise MemoryError("Not enough memory available in the blocks to allocate the object.")
+        pool_index = self.memory["arenas"].at[arena_index, "pools"][self.memory["arenas"].at[arena_index, "pools"]["pool_obj"] == pool].index[0]
 
-    # def add_object(self, obj) -> str:
-    #     obj_size = obj.__sizeof__()  # Calculate the size of the object
-    #     obj_id = self.generate_unique_id()  # Generate a unique ID for the object
-    #     self.check_memory_exceeds()  # Check if the total memory used by all blocks exceeds the available RAM
+        while remaining_memory > 0:
+            if self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "blocks"].empty or self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "blocks"].iloc[-1]["block_obj"].mem >= self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "blocks"].iloc[-1]["block_obj"].max_mem:
+                new_block = Block(0)
+                new_block_df = pd.DataFrame([{
+                    "block_obj": new_block
+                }])
+                self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "blocks"] = pd.concat([self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "blocks"], new_block_df], ignore_index=True)
 
-    #     if obj_size + self.total_block_memory > self.ram.memory:
-    #         raise MemoryError("Object size exceeds available RAM.")  # Raise an error if memory exceeds
+            last_block = self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "blocks"].iloc[-1]
+            if last_block["block_obj"].mem < last_block["block_obj"].max_mem:
+                mem_to_add = min(remaining_memory, last_block["block_obj"].max_mem - last_block["block_obj"].mem)
+                last_block["block_obj"].add_mem(mem_to_add)
+                remaining_memory -= mem_to_add
+            else:
+                raise MemoryError("Not enough memory available in the blocks to allocate the object.")
 
-    #     # Calculate the required number of arenas, pools, and blocks
-    #     required_arenas = (obj_size // self.ram.max_arena_size) + 1
-
-    #     if not self.memory["arenas"].empty:
-    #         last_arena = self.memory["arenas"].iloc[-1]
-    #         if last_arena["arena_max"] - last_arena["arena_mem"] >= obj_size and self.check_enough_pools(last_arena, obj_size):
-    #             last_arena["arena_mem"] += obj_size
-    #             self.memory["used_ram_mem"] += obj_size
-    #             self.fill_pools(last_arena, obj_size)
-    #             self.object_index[obj_id] = {"object": obj, "size": obj_size, "paths": last_arena["pools"]["blocks"]}
-    #             return obj_id
-
-    #     while required_arenas > 0:
-    #         remaining_memory = self.ram.memory - self.total_block_memory
-    #         if remaining_memory > 0:
-    #             new_arena = Arena(0)
-    #             self.add_arena(new_arena)
-    #             required_arenas -= 1
-    #         else:
-    #             raise MemoryError("Not enough memory available to create more arenas.")
-
-    #     # After creating the necessary arenas, check and create the required pools and blocks
-    #     for arena in self.memory["arenas"].itertuples():
-    #         if self.check_enough_pools(arena, obj_size):
-    #             for pool in arena.pools.itertuples():
-    #                 if self.check_enough_blocks(arena, pool, obj_size):
-    #                     arena.arena_mem += obj_size
-    #                     self.memory["used_ram_mem"] += obj_size
-    #                     self.fill_pools(arena, obj_size)
-    #                     self.fill_blocks(pool, obj_size)
-
-    #     return obj_id
+        print(f"Total Block Memory in Pool: {pool.mem}")
 
     def get_object(self, obj_id: str):
         """
@@ -206,35 +174,28 @@ class MemManager:
         """
         return f"Memory Manager: {self.memory}"
 
+# Demo
+if __name__ == "__main__":
+    ram = RAM(memory=1_000_000)  # 1,000,000 units of RAM
+    mem_manager = MemManager(ram=ram)
 
-# def main():
-    # Step 1: Create a RAM instance with default memory
-    # ram = RAM()
+    # Allocate 50,000 units of memory
+    obj_mem = 500000
+    mem_manager.fill_ram(obj_mem)
 
-    # Step 2: Initialize the memory manager with the RAM instance
-    # mem_manager = MemManager(ram)
+    # Print the memory manager state
+    print(mem_manager)
 
-    # Step 3: Add one arena, one pool, and one block
-    # arena = Arena(0)
-    # mem_manager.add_arena(arena)
+    # Check the total memory in arenas
+    total_arena_mem = sum(arena.arena_obj.mem for arena in mem_manager.memory["arenas"].itertuples())
+    print(f"Total Arena Memory: {total_arena_mem}")
 
-    # pool = Pool(0)
-    # mem_manager.add_pool("Arena 1", pool)
+    # Check if pools and blocks have been created within the arenas
+    for arena in mem_manager.memory["arenas"].itertuples():
+        print(f"Arena: {arena.arena_name}, Pools: {len(arena.pools)}")
+        for pool in arena.pools.itertuples():
+            print(f"  Pool: {pool.pool_name}, Blocks: {len(pool.blocks)}")
+        print(f"Remaining Memory in {arena.arena_name}: {arena.arena_obj.max_mem - arena.arena_obj.mem}")
 
-    # block = Block(0)
-    # mem_manager.add_block("Arena 1", "pool 1", block)
-
-    # mem_manager.memory["arenas"]
-
-    # Step 4: Create a sample object and add it to the memory manager
-    # sample_object = "test_object" * 2000
-    # obj_id = mem_manager.add_object(sample_object)
-    # print(f"Object ID: {obj_id}")
-
-    # Step 5: Retrieve and print the object using its unique ID
-    # retrieved_object = mem_manager.get_object(obj_id)
-    # print(f"Retrieved Object: {retrieved_object}")
-
-    # Step 6: Print the memory manager's state
-    # with open("memory_manager_state.txt", "w") as file:
-    #     file.write(str(mem_manager))
+    print(mem_manager.memory["arenas"].iloc[0]["arena_obj"].mem)
+    print(f"Number of Pools in the first Arena: {len(mem_manager.memory['arenas'].iloc[0]['pools'])}")
