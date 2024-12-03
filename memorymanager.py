@@ -14,10 +14,81 @@ class MemManager:
             "arenas": pd.DataFrame(columns=["arena_obj", "arena_name", "pools"])
         }
         self.object_index = {}
-        self.free_blocks = []
+        self.paths = {}
 
     def generate_unique_id(self) -> str:
         return str(uuid.uuid4())
+
+    def add_object(self, obj) -> str:
+        obj_id = self.generate_unique_id()
+        obj_size = obj.__sizeof__()
+
+        # Use fill_ram to allocate memory for the object
+        self.fill_ram(obj_size)
+
+        # Check if there are any existing arenas
+        if self.memory["arenas"].empty:
+            arena_name = "Arena 1"
+            new_arena = Arena(0)  # Create the first arena if none exists
+            self.add_arena(new_arena)
+        else:
+            arena_name = self.memory["arenas"].iloc[0]["arena_name"]  # Use the first arena
+
+        # Update the object index
+        if arena_name not in self.object_index:
+            self.object_index[arena_name] = {}
+
+        self.object_index[arena_name].update({obj_id: {"object": obj}})
+
+        print(f"Added object with ID '{obj_id}' to {arena_name}")
+        return obj_id
+
+    def get_blocks(self):
+        """Generator that yields all blocks in the memory manager."""
+        return (block
+                for arena in self.memory["arenas"].itertuples()
+                for pool in arena.pools.itertuples()
+                for block in pool.blocks.itertuples())
+
+    def remove_object(self, obj_id: str) -> None:
+        """Remove an object or block from memory."""
+        # Remove from object_index if present
+        obj_size = next((objects[obj_id]["object"].__sizeof__() 
+                        for arena_name, objects in self.object_index.items() 
+                        if obj_id in objects), 0)
+        
+        if obj_size:
+            arena_name = next(name for name, objects in self.object_index.items() if obj_id in objects)
+            del self.object_index[arena_name][obj_id]
+            print(f"Removed object with ID '{obj_id}' from {arena_name}")
+
+        # Remove from paths if present
+        if obj_id in self.paths:
+            del self.paths[obj_id]
+
+        # Find and update the block
+        block = next((block for block in self.get_blocks()
+                     if str(block.block_obj.__hash__()) == str(obj_id) or 
+                     block.block_obj.contains(obj_id)), None)
+        
+        if block:
+            if str(block.block_obj.__hash__()) == str(obj_id):
+                block.block_obj.deallocate()
+                self.memory["used_ram_mem"] -= block.block_obj.mem
+            else:
+                block.block_obj.remove_object(obj_id)
+                # Update memory for containing pools and arenas
+                for arena in self.memory["arenas"].itertuples():
+                    for pool in arena.pools.itertuples():
+                        if any(b.block_obj == block.block_obj for b in pool.blocks.itertuples()):
+                            pool.pool_obj.mem -= obj_size
+                            arena.arena_obj.mem -= obj_size
+                            break
+        else:
+            print(f"Object with ID '{obj_id}' not found.")
+            return
+
+        print(f"Updated RAM Memory: {self.memory['used_ram_mem']}")
 
     def add_arena(self, arena: Arena) -> None:
         arena_count = len(self.memory["arenas"]) + 1
@@ -46,28 +117,38 @@ class MemManager:
             raise ValueError(f"Arena {arena_name} does not exist.")
 
     def add_block(self, arena_name: str, pool_name: str, block: Block) -> None:
-        arena_index = self.memory["arenas"][self.memory["arenas"]["arena_name"] == arena_name].index
-        if not arena_index.empty:
-            arena_index = arena_index[0]
-            pool_index = self.memory["arenas"].at[arena_index, "pools"][self.memory["arenas"].at[arena_index, "pools"]["pool_name"] == pool_name].index
-            if not pool_index.empty:
-                pool_index = pool_index[0]
-                pool = self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "pool_obj"]
-                if pool.mem + block.mem > pool.max_mem:
-                    # Pool is full, create a new pool
-                    new_pool = Pool(0)
-                    self.add_pool(arena_name, new_pool)
-                    pool_name = f"pool {len(self.memory['arenas'].at[arena_index, 'pools'])}"
-                new_block = {
-                    "block_obj": block
-                }
-                self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "blocks"] = pd.concat([self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "blocks"], pd.DataFrame([new_block])], ignore_index=True)
-                pool.mem += block.mem
-                print(f"Added Block to Pool: {pool_name} in Arena: {arena_name}")
-            else:
-                raise ValueError(f"Pool {pool_name} does not exist in Arena {arena_name}.")
+        """Add a block to a specified pool in an arena."""
+        arena_index = self.memory["arenas"][self.memory["arenas"]["arena_name"] == arena_name].index[0]
+        pool_index = self.memory["arenas"].at[arena_index, "pools"][
+            self.memory["arenas"].at[arena_index, "pools"]["pool_name"] == pool_name
+        ].index[0]
+        pool = self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "pool_obj"]
+
+        if pool.mem + block.mem > pool.max_mem:
+            new_pool = Pool(0)
+            self.add_pool(arena_name, new_pool)
+            pool_name = f"pool {len(self.memory['arenas'].at[arena_index, 'pools'])}"
+            print(f"Created new Pool: {pool_name} in Arena: {arena_name}")
+
+        # Try to find and reuse a free block
+        free_block = self.find_free_block(arena_name, pool_name)
+        if free_block:
+            free_block.mem = block.mem
+            free_block.allocate()
+            if block.mem > 0:
+                self.memory["used_ram_mem"] += block.mem
+            print(f"Reused free block in Pool: {pool_name} in Arena: {arena_name}")
         else:
-            raise ValueError(f"Arena {arena_name} does not exist.")
+            blocks = self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "blocks"]
+            new_block = {"block_obj": block}
+            self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "blocks"] = pd.concat(
+                [blocks, pd.DataFrame([new_block])], ignore_index=True
+            )
+            pool.mem += block.mem
+            block.allocate()
+            if block.mem > 0:
+                self.memory["used_ram_mem"] += block.mem
+            print(f"Added new block to Pool: {pool_name} in Arena: {arena_name}")
 
     def calculate_arena_memory(self, arena_name: str) -> int:
         arena_index = self.memory["arenas"][self.memory["arenas"]["arena_name"] == arena_name].index
@@ -133,6 +214,7 @@ class MemManager:
                 remaining_memory -= mem_to_add
                 print(f"Filling blocks in {last_pool['pool_name']} with {mem_to_add} memory")
                 self.fill_blocks(last_pool["pool_obj"], mem_to_add, arena_index)
+
             else:
                 raise MemoryError("Not enough memory available in the pools to allocate the object.")
 
@@ -178,28 +260,60 @@ class MemManager:
         """
         return f"Memory Manager: {self.memory}"
 
+    def get_memory_stats(self) -> dict:
+        """
+        Get statistics about memory usage.
+        Returns a dictionary containing memory usage statistics.
+        """
+        return {
+            "total_arenas": len(self.memory["arenas"]),
+            "total_pools": sum(len(arena.pools) for arena in self.memory["arenas"].itertuples()),
+            "used_memory": self.memory["used_ram_mem"],
+            "free_memory": self.memory["ram_mem"] - self.memory["used_ram_mem"],
+            "free_blocks": sum(1 
+                          for arena in self.memory["arenas"].itertuples()
+                          for pool in arena.pools.itertuples()
+                          for block in pool.blocks.itertuples()
+                          if block.block_obj.is_free)
+        }
+
+    def find_free_block(self, arena_name: str, pool_name: str):
+        """Find first free block in specified pool."""
+        arena_index = self.memory["arenas"][self.memory["arenas"]["arena_name"] == arena_name].index[0]
+        pool_index = self.memory["arenas"].at[arena_index, "pools"][
+            self.memory["arenas"].at[arena_index, "pools"]["pool_name"] == pool_name
+        ].index[0]
+        blocks = self.memory["arenas"].at[arena_index, "pools"].at[pool_index, "blocks"]
+        return next((row["block_obj"] for _, row in blocks.iterrows() if row["block_obj"].is_free), None)
+
 # Demo
 if __name__ == "__main__":
+    # Initialize RAM with a specific amount of memory
     ram = RAM(memory=1_000_000)  # 1,000,000 units of RAM
+
+    # Create a memory manager instance
     mem_manager = MemManager(ram=ram)
 
-    # Allocate 50,000 units of memory
-    obj_mem = 500000
-    mem_manager.fill_ram(obj_mem)
+    # Add various objects to the memory manager
+    objects_to_add = [42, "hello", 3.14, [1, 2, 3], {"key": "value"}]  # Different data types
+    for obj in objects_to_add:
+        mem_manager.add_object(obj)
 
-    # Print the memory manager state
+    # Print the current state of the memory manager
     print(mem_manager)
 
     # Check the total memory in arenas
     total_arena_mem = sum(arena.arena_obj.mem for arena in mem_manager.memory["arenas"].itertuples())
     print(f"Total Arena Memory: {total_arena_mem}")
 
-    # Check if pools and blocks have been created within the arenas
-    for arena in mem_manager.memory["arenas"].itertuples():
-        print(f"Arena: {arena.arena_name}, Pools: {len(arena.pools)}")
-        for pool in arena.pools.itertuples():
-            print(f"  Pool: {pool.pool_name}, Blocks: {len(pool.blocks)}")
-        print(f"Remaining Memory in {arena.arena_name}: {arena.arena_obj.max_mem - arena.arena_obj.mem}")
-
+    print(mem_manager.object_index)
+    # Remove first object from each arena
+    for arena_name, objects in mem_manager.object_index.items():
+        if objects:  # Check if arena has any objects
+            first_obj_id = next(iter(objects))  # Get first object ID
+            mem_manager.remove_object(first_obj_id)
+    print(mem_manager.object_index)
     print(mem_manager.memory["arenas"].iloc[0]["arena_obj"].mem)
-    print(f"Number of Pools in the first Arena: {len(mem_manager.memory['arenas'].iloc[0]['pools'])}")
+    print(mem_manager)
+
+
