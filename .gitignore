@@ -4,3 +4,4 @@
 # Ignore the temp directory
 ram_sim_venv/
 /ram_venv
+/__pycache__/
