@@ -1,8 +1,8 @@
 import unittest
 from memorymanager import MemManager
-from arenatest_2 import Arena
-from pooltest_2 import Pool
-from blocktest_2 import Block
+from arena import Arena
+from pool import Pool
+from block import Block
 from ram import RAM
 import pandas as pd
 
@@ -65,20 +65,32 @@ class TestMemManager(unittest.TestCase):
             for pool in arena.pools.itertuples():
                 self.assertGreater(len(pool.blocks), 0)
 
-    def test_fill_pools(self):
-        arena = Arena(0)
-        self.mem_manager.add_arena(arena)
-        self.mem_manager.fill_pools(arena, 50000)
-        self.assertGreater(len(arena.pools), 0)
-        total_pool_mem = sum(pool.pool_obj.mem for pool in arena.pools.itertuples())
-        self.assertEqual(total_pool_mem, 50000)
+    def test_fill_arena(self):
+        obj_mem = 50000  # 50,000 units of memory
+        self.mem_manager.fill_ram(obj_mem)
 
-    def test_fill_blocks(self):
-        pool = Pool(0)
-        self.mem_manager.fill_blocks(pool, 4096)
-        self.assertGreater(len(pool.blocks), 0)
-        total_block_mem = sum(block.block_obj.mem for block in pool.blocks.itertuples())
-        self.assertEqual(total_block_mem, 4096)
+        # Check that at least one arena has been created
+        self.assertGreater(len(self.mem_manager.memory["arenas"]), 0)
+
+        # Verify that the total memory in the arena matches the allocated memory
+        total_arena_mem = sum(arena.arena_obj.mem for arena in self.mem_manager.memory["arenas"].itertuples())
+        self.assertEqual(total_arena_mem, obj_mem)
+
+    def test_fill_pool(self):
+        obj_mem = 50000  # 50,000 units of memory
+        self.mem_manager.fill_ram(obj_mem)
+
+        # Check that at least one arena has been created
+        self.assertGreater(len(self.mem_manager.memory["arenas"]), 0)
+
+        # Check that pools have been created in the arenas
+        for arena in self.mem_manager.memory["arenas"].itertuples():
+            self.assertGreater(len(arena.pools), 0)
+
+            # Verify that the total memory in the pools matches the allocated memory
+            total_pool_mem = sum(pool.pool_obj.mem for pool in arena.pools.itertuples())
+            self.assertEqual(total_pool_mem, arena.arena_obj.mem)
+
 
     def test_arena_has_pools_column(self):
         arena = Arena(0)
@@ -113,5 +125,5 @@ class TestMemManager(unittest.TestCase):
             for pool in arena.pools.itertuples():
                 self.assertGreater(len(pool.blocks), 0)
 
-    if __name__ == '__main__':
+if __name__ == "__main__":
         unittest.main()

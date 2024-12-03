@@ -1,8 +1,8 @@
 import uuid
-import pandas as pd
-from blocktest_2 import Block
-from arenatest_2 import Arena
-from pooltest_2 import Pool
+import pandas as pd # type: ignore
+from block import Block
+from arena import Arena
+from pool import Pool
 from ram import RAM
 
 class MemManager:
@@ -100,8 +100,12 @@ class MemManager:
                 remaining_memory -= mem_to_add
                 print(f"Filling pools in {last_arena['arena_name']} with {mem_to_add} memory")
                 self.fill_pools(last_arena["arena_obj"], mem_to_add)
+
             else:
                 raise MemoryError("Not enough memory available in the arenas to allocate the object.")
+            print(f"Total Arena Memory in RAM: {last_arena['arena_obj'].mem}")
+            print(f"Remaining Memory in RAM: {self.memory['ram_mem'] - self.memory['used_ram_mem']}")
+
         self.memory["used_ram_mem"] += obj_mem
         print(f"Used RAM Memory: {self.memory['used_ram_mem']}")
 
