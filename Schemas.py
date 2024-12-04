@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, ForeignKey, event
+from sqlalchemy import create_engine, Column, Integer, ForeignKey, String, event, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 
@@ -64,3 +64,16 @@ class Block(Base):
         else:
             raise MemoryError("Inte tillräckligt med utrymme i blocket för att lagra objektet.") 
 
+class Ledger(Base):
+    __tablename__ = 'ledger'
+    
+    id = Column(Integer, primary_key=True)
+    arena_id = Column(Integer, ForeignKey('arenas.id'))
+    pool_id = Column(Integer, ForeignKey('pools.id'))
+    block_id = Column(Integer, ForeignKey('blocks.id'))
+    object_id = Column(String)  # Identifiera objektet, t.ex. med en unik sträng eller hash
+    allocated_mem = Column(Integer)  # Mängden minne som allokerats
+
+    arena = relationship("Arena")
+    pool = relationship("Pool")
+    block = relationship("Block")
