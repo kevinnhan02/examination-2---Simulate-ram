@@ -65,7 +65,7 @@ class MemManager:
         obj_size = obj_instance.__sizeof__()
 
         # Skapa en unik och konsistent identifierare för objektet
-        object_id = hashlib.sha256(json.dumps(obj_instance).encode()).hexdigest()
+        object_id = self.generate_object_id(obj_instance)
 
         # Kontrollera om det finns tillräckligt med minne i MemRam
         if self.memram.max_mem < obj_size:
@@ -166,4 +166,4 @@ class MemManager:
 
         # Spara ändringarna
         self.session.commit()
-
+        
