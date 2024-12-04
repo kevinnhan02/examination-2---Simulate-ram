@@ -75,11 +75,14 @@ class MemManager:
 
         # Check if the object is already stored
         stored_object = self.session.query(StoredObject).filter(StoredObject.object_id == object_id).first()
-        if not stored_object:
-            # Store the object in the StoredObject table
-            stored_object = StoredObject(object_id=object_id, object_data=obj_instance)
-            self.session.add(stored_object)
-            self.session.commit()
+        if stored_object:
+            print(f"Object with identifier {object_id} already exists in the database.")
+            return
+
+        # Store the object in the StoredObject table
+        stored_object = StoredObject(object_id=object_id, object_data=obj_instance)
+        self.session.add(stored_object)
+        self.session.commit()
 
         # Get blocks that have enough space for the object
         while remaining_size > 0:
