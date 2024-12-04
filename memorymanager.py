@@ -10,9 +10,9 @@ import re
 
 class MemManager:
     def __init__(self, db_url: str) -> None:
-        # Skapa en databasanslutning
+
         self.engine = create_engine(db_url)
-        Base.metadata.create_all(self.engine)  # Skapa tabellerna
+        Base.metadata.create_all(self.engine) 
         Session = sessionmaker(bind=self.engine)
         self.session = Session()
 
@@ -22,7 +22,7 @@ class MemManager:
         self.session.commit()
 
     def add_arena(self) -> Arena:
-        """Skapa och lägg till en ny arena i databasen."""
+        """Create a new arena and add it to the MemRam table"""
         new_arena = Arena()
         new_arena.memram = self.memram
         self.session.add(new_arena)
@@ -30,7 +30,7 @@ class MemManager:
         return new_arena
 
     def add_pool(self, arena: Arena) -> Pool:
-        """Skapa och lägg till en ny pool till en specifik arena."""
+        """Create a new pool and add it to the arena table"""
         new_pool = Pool()
         new_pool.arena = arena
         self.session.add(new_pool)
@@ -38,7 +38,7 @@ class MemManager:
         return new_pool
 
     def add_block(self, pool: Pool) -> Block:
-        """Skapa och lägg till ett nytt block till en specifik pool."""
+        """Create a new block and add it to the pool table"""
         new_block = Block()
         new_block.pool = pool
         self.session.add(new_block)
@@ -61,20 +61,19 @@ class MemManager:
             return hashlib.sha256(serialized_obj.encode('utf-8')).hexdigest()
 
     def allocate_memory_for_object(self, obj_instance) -> None:
-        """Allokera minne för ett objekt genom att skapa nödvändiga arenor, pooler och block."""
+        """Allocate memory for an object by creating necessary arenas, pools and blocks."""
         obj_size = obj_instance.__sizeof__()
 
-        # Skapa en unik och konsistent identifierare för objektet
+        # Create a unique and consistent identifier for the object
         object_id = self.generate_object_id(obj_instance)
 
-        # Kontrollera om det finns tillräckligt med minne i MemRam
         if self.memram.max_mem < obj_size:
-            raise MemoryError("Inte tillräckligt med minne för att allokera objektet.")
+            raise MemoryError("Not enough memory to allocate object.")
         
         remaining_size = obj_size
         blocks_to_update = []
 
-        # Hämta block som har tillräckligt med utrymme för objektet
+        # Get blocks that have enough space for the object
         while remaining_size > 0:
             suitable_block = self.session.query(Block).filter(
                 Block.is_free == 1,
@@ -82,17 +81,17 @@ class MemManager:
             ).first()
 
             if suitable_block:
-                # Beräkna hur mycket utrymme som finns kvar i blocket
+                # Calculate how much space is left in the block
                 available_space = suitable_block.max_mem - suitable_block.mem
                 to_allocate = min(remaining_size, available_space)
 
-                # Lägg till del av objektet i blocket
+                # Add part of the object to the block
                 suitable_block.mem += to_allocate
                 suitable_block.is_free = 0 if suitable_block.mem == suitable_block.max_mem else 1
                 remaining_size -= to_allocate
                 blocks_to_update.append(suitable_block)
 
-                # Lägg till en post i ledger
+                # Add a post to the ledger
                 ledger_entry = Ledger(
                     arena_id=suitable_block.pool.arena_id,
                     pool_id=suitable_block.pool_id,
@@ -102,30 +101,30 @@ class MemManager:
                 )
                 self.session.add(ledger_entry)
             else:
-                # Hitta en arena med tillräckligt med utrymme för en ny pool
+                # Find an arena with enough space for a new pool
                 arena = self.session.query(Arena).filter(Arena.max_mem - Arena.mem > 0).first()
                 if not arena:
                     arena = self.add_arena()
                 
-                # Kontrollera om det finns tillräckligt med pooler i arenan
+                # Check if there are enough pools in the arena
                 pool = self.session.query(Pool).filter(Pool.arena_id == arena.id, Pool.max_mem - Pool.mem > 0).first()
                 if not pool:
                     pool = self.add_pool(arena)
                 
-                # Skapa ett nytt block i poolen
+                # Create a new block in the pool
                 block = self.add_block(pool)
 
-                # Beräkna hur mycket utrymme som finns kvar i blocket
+                # Calculate how much space is left in the block
                 available_space = block.max_mem - block.mem
                 to_allocate = min(remaining_size, available_space)
 
-                # Lägg till del av objektet i blocket
+                # Add part of the object to the block
                 block.mem += to_allocate
                 block.is_free = 0 if block.mem == block.max_mem else 1
                 remaining_size -= to_allocate
                 blocks_to_update.append(block)
 
-                # Lägg till en post i ledger
+                # Add a post to the ledger
                 ledger_entry = Ledger(
                     arena_id=block.pool.arena_id,
                     pool_id=block.pool_id,
@@ -142,26 +141,26 @@ class MemManager:
         print(f"Allocated {obj_size} bytes for object across multiple blocks.")
 
     def free_memory_for_object(self, identifier) -> None:
-        """Frigör minne för ett objekt genom att uppdatera ledger och block."""
-        # Kontrollera om identifieraren är ett objekt eller en sträng
+        """Free memory for an object by updating the ledger and blocks."""
+        # Check if the identifier is an object or a string
         object_id = self.generate_object_id(identifier)
 
         print(f"Freeing memory for object with identifier: {object_id}")
 
-        # Hämta alla ledger-poster för det angivna object_id
+        # Get all ledger entries for the given object_id
         ledger_entries = self.session.query(Ledger).filter(Ledger.object_id == object_id).all()
 
         for ledger_entry in ledger_entries:
-            # Hämta motsvarande block
+            # Get the corresponding block
             block = self.session.query(Block).filter(Block.id == ledger_entry.block_id).first()
 
             if block:
-                # Frigör minne i blocket
+                # Free memory in the block
                 allocated_mem = ledger_entry.allocated_mem
                 block.mem -= allocated_mem
-                # Låt event listener hantera is_free
+                # Let the event listener handle is_free
 
-        # Ta bort alla ledger-poster för det angivna object_id
+        # Delete all ledger entries for the given object_id
         self.session.query(Ledger).filter(Ledger.object_id == object_id).delete()
 
         # Spara ändringarna

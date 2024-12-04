@@ -8,3 +8,4 @@ ram_sim_venv/
 /__pycache__
 /__pycache__
 helpers/__pycache__
+database.db
