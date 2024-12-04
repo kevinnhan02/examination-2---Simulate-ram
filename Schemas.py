@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, ForeignKey, String, event, Text
+from sqlalchemy import create_engine, Column, Integer, ForeignKey, String, event, Text,PickleType
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 
@@ -7,9 +7,10 @@ Base = declarative_base()
 
 class MemRam(Base):
     __tablename__ = 'memram'
-    
+
     id = Column(Integer, primary_key=True)
     max_mem = Column(Integer)
+    mem = Column(Integer, default=0)
     arenas = relationship("Arena", back_populates="memram")
 
     def __init__(self, max_mem=17_179_869_184):
@@ -17,7 +18,7 @@ class MemRam(Base):
 
 class Arena(Base):
     __tablename__ = 'arenas'
-    
+
     id = Column(Integer, primary_key=True)
     max_mem = Column(Integer, default=262144)
     mem = Column(Integer, default=0)
@@ -30,7 +31,7 @@ class Arena(Base):
 
 class Pool(Base):
     __tablename__ = 'pools'
-    
+
     id = Column(Integer, primary_key=True)
     max_mem = Column(Integer, default=4096)
     mem = Column(Integer, default=0)
@@ -43,7 +44,7 @@ class Pool(Base):
 
 class Block(Base):
     __tablename__ = 'blocks'
-    
+
     id = Column(Integer, primary_key=True)
     max_mem = Column(Integer, default=512)
     mem = Column(Integer, default=0)
@@ -54,26 +55,26 @@ class Block(Base):
     def __init__(self, max_mem=512):
         self.max_mem = max_mem
 
-    def add_object(self, obj_instance):
-        """Lägg till ett objekt i blocket."""
-        obj_size = obj_instance.__sizeof__()
-        if self.max_mem - self.mem >= obj_size:
-            self.mem += obj_size
-            # Här kan du lägga till logik för att faktiskt lagra objektet
-            # Exempel: self.stored_object = obj_instance
-        else:
-            raise MemoryError("Inte tillräckligt med utrymme i blocket för att lagra objektet.") 
+class StoredObject(Base):
+    __tablename__ = 'stored_objects'
+
+    id = Column(Integer, primary_key=True)
+    object_id = Column(String, unique=True)
+    object_data = Column(PickleType, nullable=False)
 
 class Ledger(Base):
     __tablename__ = 'ledger'
-    
+
     id = Column(Integer, primary_key=True)
     arena_id = Column(Integer, ForeignKey('arenas.id'))
     pool_id = Column(Integer, ForeignKey('pools.id'))
     block_id = Column(Integer, ForeignKey('blocks.id'))
-    object_id = Column(String)  # Identifiera objektet, t.ex. med en unik sträng eller hash
-    allocated_mem = Column(Integer)  # Mängden minne som allokerats
+    object_id = Column(String, ForeignKey('stored_objects.object_id'))  # Reference to the stored object
+    allocated_mem = Column(Integer)  # Amount of memory allocated
 
     arena = relationship("Arena")
     pool = relationship("Pool")
     block = relationship("Block")
+    stored_object = relationship("StoredObject", back_populates="ledger_entries")
+
+StoredObject.ledger_entries = relationship("Ledger", back_populates="stored_object")

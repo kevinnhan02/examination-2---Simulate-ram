@@ -1,8 +1,8 @@
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
-from Schemas import Base, MemRam, Arena, Pool, Block, Ledger
+from Schemas import Base, MemRam, Arena, Pool, Block, Ledger, StoredObject
 from sqlalchemy.sql import func
-import helpers.listeners 
+import helpers.listeners
 import json
 import hashlib
 import re
@@ -12,7 +12,7 @@ class MemManager:
     def __init__(self, db_url: str) -> None:
 
         self.engine = create_engine(db_url)
-        Base.metadata.create_all(self.engine) 
+        Base.metadata.create_all(self.engine)
         Session = sessionmaker(bind=self.engine)
         self.session = Session()
 
@@ -69,9 +69,17 @@ class MemManager:
 
         if self.memram.max_mem < obj_size:
             raise MemoryError("Not enough memory to allocate object.")
-        
+
         remaining_size = obj_size
         blocks_to_update = []
+
+        # Check if the object is already stored
+        stored_object = self.session.query(StoredObject).filter(StoredObject.object_id == object_id).first()
+        if not stored_object:
+            # Store the object in the StoredObject table
+            stored_object = StoredObject(object_id=object_id, object_data=obj_instance)
+            self.session.add(stored_object)
+            self.session.commit()
 
         # Get blocks that have enough space for the object
         while remaining_size > 0:
@@ -105,12 +113,12 @@ class MemManager:
                 arena = self.session.query(Arena).filter(Arena.max_mem - Arena.mem > 0).first()
                 if not arena:
                     arena = self.add_arena()
-                
+
                 # Check if there are enough pools in the arena
                 pool = self.session.query(Pool).filter(Pool.arena_id == arena.id, Pool.max_mem - Pool.mem > 0).first()
                 if not pool:
                     pool = self.add_pool(arena)
-                
+
                 # Create a new block in the pool
                 block = self.add_block(pool)
 
@@ -158,11 +166,12 @@ class MemManager:
                 # Free memory in the block
                 allocated_mem = ledger_entry.allocated_mem
                 block.mem -= allocated_mem
-                # Let the event listener handle is_free
+                # Mark the block as dirty to trigger the listener
+                block.is_free = 0 if block.mem == block.max_mem else 1
 
         # Delete all ledger entries for the given object_id
         self.session.query(Ledger).filter(Ledger.object_id == object_id).delete()
+        self.session.query(StoredObject).filter(StoredObject.object_id == object_id).delete()
 
-        # Spara ändringarna
+        # Save the changes
         self.session.commit()
-        
