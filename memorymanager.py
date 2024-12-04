@@ -6,11 +6,14 @@ import helpers.listeners
 import json
 import hashlib
 import re
+import logging
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class MemManager:
     def __init__(self, db_url: str) -> None:
-
         self.engine = create_engine(db_url)
         Base.metadata.create_all(self.engine)
         Session = sessionmaker(bind=self.engine)
@@ -76,7 +79,7 @@ class MemManager:
         # Check if the object is already stored
         stored_object = self.session.query(StoredObject).filter(StoredObject.object_id == object_id).first()
         if stored_object:
-            print(f"Object with identifier {object_id} already exists in the database.")
+            logger.info(f"Object with identifier {object_id} already exists in the database.")
             return
 
         # Store the object in the StoredObject table
@@ -149,14 +152,14 @@ class MemManager:
         self.session.bulk_save_objects(blocks_to_update)
         self.session.commit()
 
-        print(f"Allocated {obj_size} bytes for object across multiple blocks.")
+        logger.info(f"Allocated {obj_size} bytes for object across multiple blocks.")
 
     def free_memory_for_object(self, identifier) -> None:
         """Free memory for an object by updating the ledger and blocks."""
-        # Check if the identifier is an object or a string
+        # Generate the object_id from the identifier
         object_id = self.generate_object_id(identifier)
 
-        print(f"Freeing memory for object with identifier: {object_id}")
+        logger.info(f"Freeing memory for object with identifier: {object_id}")
 
         # Get all ledger entries for the given object_id
         ledger_entries = self.session.query(Ledger).filter(Ledger.object_id == object_id).all()
@@ -166,7 +169,6 @@ class MemManager:
             block = self.session.query(Block).filter(Block.id == ledger_entry.block_id).first()
 
             if block:
-                # Free memory in the block
                 allocated_mem = ledger_entry.allocated_mem
                 block.mem -= allocated_mem
                 # Mark the block as dirty to trigger the listener
@@ -179,8 +181,22 @@ class MemManager:
         # Save the changes
         self.session.commit()
 
+        logger.info(f"Freed memory for object with identifier: {object_id}\n")
+
+    def print_memory_statistics(self):
+        """Print memory usage statistics."""
+        total_arenas = self.session.query(func.count(Arena.id)).scalar()
+        total_pools = self.session.query(func.count(Pool.id)).scalar()
+        total_blocks = self.session.query(func.count(Block.id)).scalar()
+        total_allocated_mem = self.session.query(func.sum(Block.mem)).scalar() or 0
+        total_free_mem = self.memram.max_mem - total_allocated_mem
+
+        logger.info(f"Memory Statistics: Arenas: {total_arenas}, Pools: {total_pools}, Blocks: {total_blocks}")
+        logger.info(f"Total Allocated Memory: {total_allocated_mem} bytes")
+        logger.info(f"Total Free Memory: {total_free_mem} bytes")
+
     def get_object(self, identifier):
-        """Retrieve an object from the database using its identifier."""
+        """Retrieve an object from the database using its identifier.\n"""
         # Generate the object_id from the identifier
         object_id = self.generate_object_id(identifier)
 
@@ -188,8 +204,57 @@ class MemManager:
         stored_object = self.session.query(StoredObject).filter(StoredObject.object_id == object_id).first()
 
         if stored_object:
-            print(f"Object {object_id} retrieved from the database.")
+            logger.info(f"Object with identifier {object_id} retrieved from the database.")
             return stored_object.object_data
         else:
-            print(f"Object {object_id} not found in the database.")
+            logger.info(f"Object with identifier {object_id} not found in the database.")
             return None
+
+if __name__ == "__main__":
+    # Initialize the memory manager with a SQLite database URL
+    memory_manager = MemManager("sqlite:///memory_manager_demo.sqlite")
+
+    # Create an arena
+    arena = memory_manager.add_arena()
+
+
+    # Create a pool in the arena
+    pool = memory_manager.add_pool(arena)
+
+
+    # Create a block in the pool
+    block = memory_manager.add_block(pool)
+
+    for i in range(2):
+        # Allocate memory for an object
+        obj1 = "Test Object 1" * 1000
+        memory_manager.allocate_memory_for_object(obj1)
+
+
+
+        # Allocate memory for another object
+        obj2 = {"key": "value", "number": 42}
+        memory_manager.allocate_memory_for_object(obj2)
+
+
+
+    # Retrieve the object
+    retrieved_obj1 = memory_manager.get_object(obj1)
+
+    # Retrieve the second object
+    retrieved_obj2 = memory_manager.get_object(obj2)
+
+
+    print("before freeing memory")
+    memory_manager.print_memory_statistics()
+
+
+    # Free memory for the first object
+    memory_manager.free_memory_for_object(obj1)
+
+    # Free memory for the second object
+    memory_manager.free_memory_for_object(obj2)
+
+    # Print final memory statistics
+    print("after freeing memory")
+    memory_manager.print_memory_statistics()

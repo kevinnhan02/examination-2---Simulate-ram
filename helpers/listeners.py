@@ -7,7 +7,6 @@ from Schemas import Block, Pool, Arena, MemRam
 def update_block_and_pool(mapper, connection, target):
     # Update is_free based on the block's memory usage
     target.is_free = 0 if target.mem == target.max_mem else 1
-    print(f"Listener: Updating Block ID {target.id}: is_free set to {target.is_free}")
 
     # Create a new session
     session = Session(bind=connection)
@@ -19,7 +18,6 @@ def update_block_and_pool(mapper, connection, target):
         # Get the pool and update its memory
         pool = session.query(Pool).filter(Pool.id == target.pool_id).one()
         pool.mem = total_mem
-        print(f"Listener: Updating Pool ID {pool.id}: mem set to {pool.mem}")
 
         # Save the changes
         session.commit()
@@ -41,7 +39,6 @@ def update_arena_mem(mapper, connection, target):
         # Get the arena and update its memory
         arena = session.query(Arena).filter(Arena.id == target.arena_id).one()
         arena.mem = total_mem
-        print(f"Listener: Updating Arena ID {arena.id}: mem set to {arena.mem}")
 
         # Save the changes
         session.commit()
@@ -63,7 +60,6 @@ def update_arena_memram(mapper, connection, target):
         # Get the memram and update its memory
         memram = session.query(MemRam).filter(MemRam.id == target.memram_id).one()
         memram.mem = total_memram
-        print(f"Listener: Updating MemRam ID {memram.id}: mem set to {memram.mem}")
 
         # Save the changes
         session.commit()
