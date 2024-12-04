@@ -1,6 +1,6 @@
 import unittest
 from memorymanager import MemManager
-from Schemas import Arena, Pool, Block, StoredObject
+from database_models import Arena, Pool, Block, StoredObject
 
 class TestMemoryManager(unittest.TestCase):
     def setUp(self):

@@ -1,6 +1,6 @@
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
-from Schemas import Base, MemRam, Arena, Pool, Block, Ledger, StoredObject
+from database_models import Base, MemRam, Arena, Pool, Block, Ledger, StoredObject
 from sqlalchemy.sql import func
 import helpers.listeners
 import json

@@ -1,11 +1,20 @@
-from sqlalchemy import create_engine, Column, Integer, ForeignKey, String, event, Text,PickleType
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, sessionmaker
+"""
+This module defines the SQLAlchemy ORM models for the memory management
+ system.
+"""
 
+# pylint: disable=too-few-public-methods
+
+from sqlalchemy import Column, Integer, ForeignKey, String, PickleType
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship
 
 Base = declarative_base()
 
 class MemRam(Base):
+    """
+    Represents the main memory space, managing multiple arenas.
+    """
     __tablename__ = 'memram'
 
     id = Column(Integer, primary_key=True)
@@ -17,6 +26,9 @@ class MemRam(Base):
         self.max_mem = max_mem
 
 class Arena(Base):
+    """
+    Represents a large memory space, managing multiple pools.
+    """
     __tablename__ = 'arenas'
 
     id = Column(Integer, primary_key=True)
@@ -30,6 +42,9 @@ class Arena(Base):
         self.max_mem = max_mem
 
 class Pool(Base):
+    """
+    Represents a chunk of memory that contains blocks.
+    """
     __tablename__ = 'pools'
 
     id = Column(Integer, primary_key=True)
@@ -43,6 +58,9 @@ class Pool(Base):
         self.max_mem = max_mem
 
 class Block(Base):
+    """
+    Represents a small portion of memory allocated to store a value.
+    """
     __tablename__ = 'blocks'
 
     id = Column(Integer, primary_key=True)
@@ -56,6 +74,9 @@ class Block(Base):
         self.max_mem = max_mem
 
 class StoredObject(Base):
+    """
+    Represents an object stored in the memory management system.
+    """
     __tablename__ = 'stored_objects'
 
     id = Column(Integer, primary_key=True)
@@ -63,14 +84,21 @@ class StoredObject(Base):
     object_data = Column(PickleType, nullable=False)
 
 class Ledger(Base):
+    """
+    Represents a ledger entry for tracking memory allocations.
+    """
     __tablename__ = 'ledger'
 
     id = Column(Integer, primary_key=True)
     arena_id = Column(Integer, ForeignKey('arenas.id'))
     pool_id = Column(Integer, ForeignKey('pools.id'))
     block_id = Column(Integer, ForeignKey('blocks.id'))
-    object_id = Column(String, ForeignKey('stored_objects.object_id'))  # Reference to the stored object
-    allocated_mem = Column(Integer)  # Amount of memory allocated
+
+    # Reference to the stored object
+    object_id = Column(String, ForeignKey('stored_objects.object_id'))
+
+    # Amount of memory allocated
+    allocated_mem = Column(Integer)
 
     arena = relationship("Arena")
     pool = relationship("Pool")
