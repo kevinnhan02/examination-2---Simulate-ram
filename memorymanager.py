@@ -178,3 +178,18 @@ class MemManager:
 
         # Save the changes
         self.session.commit()
+
+    def get_object(self, identifier):
+        """Retrieve an object from the database using its identifier."""
+        # Generate the object_id from the identifier
+        object_id = self.generate_object_id(identifier)
+
+        # Query the StoredObject table for the object
+        stored_object = self.session.query(StoredObject).filter(StoredObject.object_id == object_id).first()
+
+        if stored_object:
+            print(f"Object {object_id} retrieved from the database.")
+            return stored_object.object_data
+        else:
+            print(f"Object {object_id} not found in the database.")
+            return None

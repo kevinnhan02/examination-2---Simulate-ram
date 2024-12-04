@@ -1,11 +1,40 @@
-# test_memorymanager.py
 import unittest
 from memorymanager import MemManager
-from Schemas import Arena, Pool, Block
+from Schemas import Arena, Pool, Block, StoredObject
 
 class TestMemoryManager(unittest.TestCase):
     def setUp(self):
         self.memory_manager = MemManager("sqlite:///databasetest.sqlite")
+
+    def test_allocate_memory_for_object(self):
+        obj = "Test Object" * 1000
+        self.memory_manager.allocate_memory_for_object(obj)
+
+        # Verify that the object is stored in the database
+        object_id = self.memory_manager.generate_object_id(obj)
+        stored_object = self.memory_manager.session.query(StoredObject).filter(StoredObject.object_id == object_id).first()
+        self.assertIsNotNone(stored_object)
+        self.assertEqual(stored_object.object_data, obj)
+
+    def test_get_object(self):
+        obj = "Test Object" * 1000
+        self.memory_manager.allocate_memory_for_object(obj)
+
+        # Retrieve the object using get_object
+        retrieved_obj = self.memory_manager.get_object(obj)
+        self.assertEqual(retrieved_obj, obj)
+
+    def test_free_memory_for_object(self):
+        obj = "Test Object" * 1000
+        self.memory_manager.allocate_memory_for_object(obj)
+
+        # Free the memory for the object
+        self.memory_manager.free_memory_for_object(obj)
+
+        # Verify that the object is removed from the database
+        object_id = self.memory_manager.generate_object_id(obj)
+        stored_object = self.memory_manager.session.query(StoredObject).filter(StoredObject.object_id == object_id).first()
+        self.assertIsNone(stored_object)
 
     def test_listener_updates(self):
         obj = "Test Object" * 1000
@@ -57,6 +86,29 @@ class TestMemoryManager(unittest.TestCase):
 
         # Ensure the block's is_free attribute is updated correctly
         print(f"Block is_free: {block.is_free}, Expected is_free: {0 if block.mem == block.max_mem else 1}")
+        self.assertEqual(block.is_free, 0 if block.mem == block.max_mem else 1)
+
+    def test_reuse_freed_blocks(self):
+        obj1 = "Test Object 1" * 1000
+        obj2 = "Test Object 2" * 1000
+
+        # Allocate memory for the first object
+        self.memory_manager.allocate_memory_for_object(obj1)
+
+        # Free the memory for the first object
+        self.memory_manager.free_memory_for_object(obj1)
+
+        # Allocate memory for the second object
+        self.memory_manager.allocate_memory_for_object(obj2)
+
+        # Verify that the second object is stored in the database
+        object_id2 = self.memory_manager.generate_object_id(obj2)
+        stored_object2 = self.memory_manager.session.query(StoredObject).filter(StoredObject.object_id == object_id2).first()
+        self.assertIsNotNone(stored_object2)
+        self.assertEqual(stored_object2.object_data, obj2)
+
+        # Verify that the freed block is reused
+        block = self.memory_manager.session.query(Block).first()
         self.assertEqual(block.is_free, 0 if block.mem == block.max_mem else 1)
 
 if __name__ == '__main__':
