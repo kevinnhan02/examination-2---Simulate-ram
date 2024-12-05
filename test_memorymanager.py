@@ -113,7 +113,6 @@ class TestMemoryManager(unittest.TestCase):
 
     def test_manual_garbage_collection(self):
         obj1 = "Test Object 1" * 1000
-        obj2 = "Test Object 2" * 1000
 
         # Allocate memory for the first object
         self.memory_manager.allocate_memory_for_object(obj1)
