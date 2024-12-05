@@ -511,6 +511,10 @@ if __name__ == "__main__":
         # Retrieve the second object
         retrieved_obj2 = memory_manager.get_object(obj2)
 
+        # print("\n**retrieved objects**\n"
+        #       f"OBJ1: {retrieved_obj1}\n"
+        #       f"obj2: {retrieved_obj2}")
+
         print("\n**before freeing memory**\n")
         memory_manager.print_memory_statistics()
 
