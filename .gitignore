@@ -7,3 +7,10 @@ ram_sim_venv/
 /__pycache__
 /__pycache__
 /__pycache__
+helpers/__pycache__
+database.db
+memory_manager_demo.sqlite
+output.txt
+output.txt
+*.txt
+databasetest.sqlite
