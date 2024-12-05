@@ -111,5 +111,28 @@ class TestMemoryManager(unittest.TestCase):
         block = self.memory_manager.session.query(Block).first()
         self.assertEqual(block.is_free, 0 if block.mem == block.max_mem else 1)
 
+    def test_manual_garbage_collection(self):
+        obj1 = "Test Object 1" * 1000
+        obj2 = "Test Object 2" * 1000
+
+        # Allocate memory for the first object
+        self.memory_manager.allocate_memory_for_object(obj1)
+
+        # Free the memory for the first object
+        self.memory_manager.free_memory_for_object(obj1)
+
+        # Perform manual garbage collection
+        self.memory_manager.manual_garbage_collection()
+
+        # Verify that unused resources are removed
+        unused_blocks = self.memory_manager.session.query(Block).filter(Block.is_free == 1, Block.mem == 0).all()
+        self.assertEqual(len(unused_blocks), 0)
+
+        empty_pools = self.memory_manager.session.query(Pool).filter(~Pool.blocks.any()).all()
+        self.assertEqual(len(empty_pools), 0)
+
+        empty_arenas = self.memory_manager.session.query(Arena).filter(~Arena.pools.any()).all()
+        self.assertEqual(len(empty_arenas), 0)
+
 if __name__ == '__main__':
     unittest.main()
